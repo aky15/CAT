@@ -10,7 +10,7 @@
 
 . ./path.sh
 # Begin configuration section.
-stage=8
+stage=0
 stop_stage=8
 data=$(readlink -f data)
 # End configuration section
