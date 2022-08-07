@@ -45,7 +45,6 @@ class Model(nn.Module):
         super(Model, self).__init__()
         self.stft = Stft(n_fft = 512, win_length = 400, hop_length = 160)
         if wpe:
-            # print("use wpe!")
             self.beamformer = BeamformerNet(beamformer_type=beamforming,use_wpe=True)
         else:
             self.beamformer = BeamformerNet(beamformer_type=beamforming)
@@ -56,13 +55,10 @@ class Model(nn.Module):
         self.net = eval(net)(input_size=idim, output_size=hdim,attention_heads=ah,num_blocks=n_layers,static_chunk_size=0, use_dynamic_chunk=False, use_dynamic_left_chunk=False,causal=False)      
         self.linear = nn.Linear(hdim, K)
         if loss == 'ctc':
-            # print("use ctc loss")
             self.loss_fn = WARP_CTC_LOSS()
         else:
-            # print("use crf loss")
             self.loss_fn = CTC_CRF_LOSS(lamb=lamb)
         if spec_aug:
-            # print("use spec augment!")
             self.specaug = SpecAug(
                 apply_time_warp=True,
                 apply_freq_mask=True,
@@ -150,7 +146,6 @@ class Model(nn.Module):
     def forward(self, samples, labels_padded, input_lengths, label_lengths, chunk_size, left_context_size, right_context_size):
         input_lengths, indices = torch.sort(input_lengths, descending=True)
         assert indices.dim() == 1, "input_lengths should have only 1 dim"
-        # print(samples)
         samples = torch.index_select(samples, 0, indices)
         labels_padded = torch.index_select(labels_padded, 0, indices)
         label_lengths = torch.index_select(label_lengths, 0, indices)
@@ -164,17 +159,14 @@ class Model(nn.Module):
         ]
         labels = torch.cat(label_list)
         
-        #print(samples.shape)
         if self.training:
             if np.random.rand() < self.p_multi:    
-                # print(samples.shape)
                 samples, flens = self.stft(samples, input_lengths)
                 max_input_length = int(chunk_size*(math.ceil(float(samples.shape[1])/chunk_size)))    
                 samples = map(lambda x: pad_tensor(x, max_input_length, 0), samples)
                 samples = torch.stack(list(samples), dim=0)
                 N_chunks = samples.size(1)//chunk_size
                 samples = samples.view(samples.size(0)*N_chunks, chunk_size, samples.size(2), samples.size(3), samples.size(4))
-                # print(samples.shape)
                 samples_left_context = torch.zeros(samples.size()[0], left_context_size, samples.size()[2], samples.size(3), samples.size(4)).to(samples.get_device())
                 if left_context_size > chunk_size:
                     N = left_context_size//chunk_size
@@ -185,10 +177,7 @@ class Model(nn.Module):
                 samples_with_context = torch.cat((samples_left_context, samples), dim=1)
                 samples_with_context, _ , _ = self.beamformer(samples_with_context,torch.full([samples_with_context.size(0)], left_context_size+chunk_size))
                 samples = samples_with_context[:, left_context_size:chunk_size + left_context_size, :]
-                #print("1", samples.shape)
                 samples = samples.contiguous().view(samples.size(0)//N_chunks, samples.size(1)*N_chunks, samples.size(2), samples.size(3))
-                #print("2", samples.shape)
-                # print(samples.shape)
             else:
                 batch, length, channel = samples.shape
                 random_idx = torch.randint(channel,(batch,length,1))
@@ -214,19 +203,14 @@ class Model(nn.Module):
             samples_with_context = torch.cat((samples_left_context, samples), dim=1)
             samples_with_context, _ , _ = self.beamformer(samples_with_context,torch.full([samples_with_context.size(0)], left_context_size+chunk_size))
             samples = samples_with_context[:, left_context_size:chunk_size + left_context_size, :]
-            #print("1", samples.shape)
             samples = samples.contiguous().view(samples.size(0)//N_chunks, samples.size(1)*N_chunks, samples.size(2), samples.size(3))
         
         input_power = samples[..., 0] ** 2 + samples[..., 1] ** 2
         input_amp = torch.sqrt(torch.clamp(input_power, min=1.0e-10))
-        #print(input_amp.shape)
-        #print(flens)
+
         input_feats, _ = self.logmel(input_amp, flens)
         input_feats, _ = self.global_mvn(input_feats, flens)
         
-        #print(input_feats.shape)
-        #print(input_feats.shape)
-        #print(flens)
         if self.predict:
             logits_chunk, predict_loss = self.forward_chunk(input_feats, chunk_size, left_context_size, right_context_size)
         else:
@@ -260,7 +244,6 @@ def main_worker(gpu, ngpus_per_node, args):
     TARGET_GPUS = [args.gpu]
     gpus = torch.IntTensor(TARGET_GPUS)
     den_path=args.den_path
-    #print(den_path)
     ctc_crf_base.init_env(den_path.encode('ascii'), gpus)
     dist.init_process_group(backend='nccl', init_method=args.dist_url,
                             world_size=args.world_size, rank=args.rank)
@@ -285,7 +268,6 @@ def main_worker(gpu, ngpus_per_node, args):
                   args.layers, args.dropout, args.lamb, args.beamforming, args.spec_aug,args.loss, args.ah, args.predict, args.right_context, args.wpe, args.p_multich)
     if args.rank==0:
         print("parameters:", sum(param.numel() for param in model.parameters()))
-    #exit()
     lr = args.lr
     optimizer = optim.Adam(model.parameters(), lr=lr)
     min_cv_loss = np.inf
@@ -322,10 +304,8 @@ def main_worker(gpu, ngpus_per_node, args):
             step = pretrained_dict['step']
             if args.rank==0:
                 print("step: ",step)
-    # model.cuda()
+                
     model = nn.parallel.DistributedDataParallel(model,find_unused_parameters=True,device_ids=TARGET_GPUS)
-    #model = nn.DataParallel(model)
-    #model.to(device)
     
     if args.wav_aug:
         if args.rank==0:
@@ -465,7 +445,6 @@ def main_worker(gpu, ngpus_per_node, args):
                     print("time: {}, tr_real_chunk_loss: {}, tr_real_utt_loss: {}, lr: {}".format(t2 - prev_t, real_chunk_loss.item(), real_utt_loss.item(), optimizer.param_groups[0]['lr']))
             prev_t = t2
             step += 1
-            # exit()
         
         # cv stage
         model.eval()
@@ -507,7 +486,6 @@ def main_worker(gpu, ngpus_per_node, args):
             else:
                 if args.rank==0:
                     print("cv_real_chunk_loss: {}, cv_real_utt_loss: {}".format(real_chunk_loss.item(), real_utt_loss.item()))
-            # exit()
         cv_loss = np.sum(np.asarray(cv_losses_sum)) / count
         if args.rank==0:
             print("mean_cv_loss: {}".format(cv_loss))
@@ -515,7 +493,6 @@ def main_worker(gpu, ngpus_per_node, args):
             cv_predict_loss = np.sum(np.asarray(predict_losses_sum)) / count
             if args.rank==0:
                 print("mean_predict_loss: {}".format(cv_predict_loss))
-        #exit()
         if args.rank==0:
             writer.add_scalar('mean_cv_loss',cv_loss,epoch)
           
@@ -535,12 +512,10 @@ def main_worker(gpu, ngpus_per_node, args):
                 print(
                     "cv loss does not improve, decay the initial learning rate from {} to {}"
                     .format(lr_init, lr_init / 10.0))
-                #adjust_lr(optimizer, lr / 10.0)
                 lr_init = lr_init / 10.0
                 if (lr_init < args.stop_lr):
                     print("learning rate is too small, finish training")
                     break
-        # exit()
         model.train()
 
     ctc_crf_base.release_env(gpus)
