@@ -48,7 +48,6 @@ class Model(nn.Module):
             self.beamformer = BeamformerNet(beamformer_type=beamforming,use_wpe=True)
         else:
             self.beamformer = BeamformerNet(beamformer_type=beamforming)
-        #print(idim)
         self.logmel = LogMel(n_mels=idim)
         self.global_mvn = GlobalMVN(stats_file, norm_means=True, norm_vars=True)     
    
